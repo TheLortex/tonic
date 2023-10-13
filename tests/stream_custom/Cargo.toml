@@ -1,0 +1,19 @@
+[package]
+authors = ["Ben Sully <ben@bsull.io>"]
+edition = "2021"
+name = "stream_custom"
+publish = false
+version = "0.1.0"
+license = "MIT"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+prost = "0.12"
+tonic = { path = "../../tonic" }
+tokio = {version = "1.0", features = ["macros", "rt-multi-thread", "net", "sync"]}
+tokio-stream = {version = "0.1.5", features = ["net"]}
+futures = "0.3"
+
+[build-dependencies]
+tonic-build = { path = "../../tonic-build" }

@@ -1,0 +1,10 @@
+syntax = "proto3";
+package StreamCustom;
+
+message Message {
+  bool ok = 1;
+}
+
+service Service {
+  rpc RunStream(Message) returns (stream Message);
+}
