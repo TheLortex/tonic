@@ -282,6 +282,8 @@ fn generate_wrapped_impl_methods<T: Service>(
 
     for method in service.methods() {
         let name = quote::format_ident!("{}", method.name());
+        let name_quoted = format!("{}", method.name());
+        let service_quoted = format!("{}.{}", service.package(), service.name());
 
         let (req_message, res_message) =
             method.request_response_name(proto_path, compile_well_known_types);
@@ -316,7 +318,7 @@ fn generate_wrapped_impl_methods<T: Service>(
                         self.inner.#name(request).await
                         .map(move |response| response
                             .map(move |stream| stream
-                                .inspect(move |_| (f)("", "", false))))
+                                .inspect(move |_| (f)(#service_quoted, #name_quoted, false))))
                     }
                 }
             }
@@ -333,7 +335,7 @@ fn generate_wrapped_impl_methods<T: Service>(
                         self.inner.#name(request).await
                             .map(move |response| response
                                 .map(move |stream| stream
-                                    .inspect(move |_| (f)("", "", false))))
+                                    .inspect(move |_| (f)(#service_quoted, #name_quoted, false))))
                     }
                 }
             }
