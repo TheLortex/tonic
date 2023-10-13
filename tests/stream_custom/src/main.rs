@@ -7,51 +7,12 @@ mod stream_custom {
     tonic::include_proto!("stream_custom");
 }
 
-struct Logger<T> {
-    inner: T,
-}
-
-impl<T> Logger<T> {
-    fn new(inner: T) -> Self {
-        Self { inner }
-    }
-}
-
-impl<M, T> tonic::server::ServerStreamingService<M> for Logger<T>
-where
-    T: tonic::server::ServerStreamingService<M>,
-{
-    type Response = T::Response;
-    type ResponseStream = impl Stream<Item = Result<Self::Response, tonic::Status>>;
-    type Future =
-        impl futures::Future<Output = Result<tonic::Response<Self::ResponseStream>, tonic::Status>>;
-
-    fn call(&mut self, request: tonic::Request<M>) -> Self::Future {
-        use futures::stream::StreamExt;
-
-        self.inner
-            .call(request)
-            .map_ok(|response| response.map(|inner| inner.inspect(|_| println!("Message"))))
-    }
-}
-
-use tonic::codegen::StreamInspectorBuilder;
-
-impl<T, M> StreamInspectorBuilder<T, M> for Logger<T>
-where
-    T: tonic::server::ServerStreamingService<M>,
-{
-    type Service = impl tonic::server::ServerStreamingService<M>;
-
-    fn new(inner: T) -> Self::Service {
-        Logger::new(inner)
-    }
-}
-
 #[tokio::test]
 async fn stream_custom_test() {
     use crate::stream_custom::Message;
     use std::time::Duration;
+    use stream_custom::service_server::Service;
+    use stream_custom::service_server::ServiceExt;
     use tokio::sync::oneshot;
 
     struct Svc;
@@ -70,7 +31,9 @@ async fn stream_custom_test() {
         }
     }
 
-    let svc = stream_custom::service_server::ServiceServer::new(Svc);
+    let svc = stream_custom::service_server::ServiceServer::new(Svc.wrap(
+        |service, method, is_going_up| println!(">> {} {} up: {}", service, method, is_going_up),
+    ));
 
     let (tx, rx) = oneshot::channel::<()>();
 

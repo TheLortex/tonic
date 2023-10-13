@@ -103,6 +103,7 @@ pub(crate) fn generate_internal<T: Service>(
                 clippy::let_unit_value,
             )]
             use tonic::codegen::*;
+            use futures::StreamExt;
 
             #generated_trait
 
@@ -115,6 +116,7 @@ pub(crate) fn generate_internal<T: Service>(
                 send_compression_encodings: EnabledCompressionEncodings,
                 max_decoding_message_size: Option<usize>,
                 max_encoding_message_size: Option<usize>,
+
             }
 
             struct _Inner<T>(Arc<T>);
@@ -228,6 +230,8 @@ fn generate_trait<T: Service>(
         use_arc_self,
         generate_default_stubs,
     );
+    let wrapped_methods =
+        generate_wrapped_impl_methods(service, proto_path, compile_well_known_types);
     let trait_doc = generate_doc_comment(format!(
         " Generated trait containing gRPC methods that should be implemented for use with {}Server.",
         service.name()
@@ -239,7 +243,106 @@ fn generate_trait<T: Service>(
         pub trait #server_trait : Send + Sync + 'static {
             #methods
         }
+
+        pub struct Wrapped<T, F>
+        {
+            inner: T,
+            stream_inspector: F
+        }
+
+        #[async_trait]
+        impl<T, F> #server_trait for Wrapped<T, F>
+            where T: #server_trait, F: Fn(&'static str, &'static str, bool) + Send + Sync + Clone +'static
+        {
+
+            #wrapped_methods
+        }
+
+        pub trait ServiceExt {
+            fn wrap<F>(self, f: F) -> Wrapped<Self, F> where Self: #server_trait + Sized;
+        }
+
+        impl<T: #server_trait> ServiceExt for T {
+            fn wrap<F>(self, f: F) -> Wrapped<Self, F> {
+                Wrapped {
+                    inner: self,
+                    stream_inspector: f
+                }
+            }
+        }
     }
+}
+
+fn generate_wrapped_impl_methods<T: Service>(
+    service: &T,
+    proto_path: &str,
+    compile_well_known_types: bool,
+) -> TokenStream {
+    let mut stream = TokenStream::new();
+
+    for method in service.methods() {
+        let name = quote::format_ident!("{}", method.name());
+
+        let (req_message, res_message) =
+            method.request_response_name(proto_path, compile_well_known_types);
+
+        let method = match (method.client_streaming(), method.server_streaming()) {
+            (false, false) => {
+                quote! {
+                    async fn #name(&self, request: tonic::Request<#req_message>)
+                        -> std::result::Result<tonic::Response<#res_message>, tonic::Status> {
+                        self.inner.#name(request).await
+                    }
+                }
+            }
+            (true, false) => {
+                quote! {
+                    async fn #name(&self, request: tonic::Request<tonic::Streaming<#req_message>>)
+                        -> std::result::Result<tonic::Response<#res_message>, tonic::Status> {
+                        self.inner.#name(request).await
+                    }
+                }
+            }
+            (false, true) => {
+                let stream = quote::format_ident!("{}Stream", method.identifier());
+                quote! {
+                    type #stream = impl tonic::codegen::tokio_stream::Stream<Item = std::result::Result<#res_message, tonic::Status>> + Send + 'static;
+
+                    async fn #name(&self, request: tonic::Request<#req_message>)
+                        -> std::result::Result<tonic::Response<Self::#stream>, tonic::Status> {
+
+                        let f = self.stream_inspector.clone();
+
+                        self.inner.#name(request).await
+                        .map(move |response| response
+                            .map(move |stream| stream
+                                .inspect(move |_| (f)("", "", false))))
+                    }
+                }
+            }
+            (true, true) => {
+                let stream = quote::format_ident!("{}Stream", method.identifier());
+
+                quote! {
+                    type #stream = impl tonic::codegen::tokio_stream::Stream<Item = std::result::Result<#res_message, tonic::Status>> + Send + 'static;
+
+                    async fn #name(&self, request: tonic::Request<tonic::Streaming<#req_message>>)
+                        -> std::result::Result<tonic::Response<Self::#stream>, tonic::Status> {
+                        let f = self.stream_inspector.clone();
+
+                        self.inner.#name(request).await
+                            .map(move |response| response
+                                .map(move |stream| stream
+                                    .inspect(move |_| (f)("", "", false))))
+                    }
+                }
+            }
+        };
+
+        stream.extend(method);
+    }
+
+    stream
 }
 
 fn generate_trait_methods<T: Service>(
